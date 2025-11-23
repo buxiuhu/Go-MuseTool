@@ -1,0 +1,22 @@
+{
+  "theme_preference": "",
+  "language": "",
+  "tab_position": "",
+  "window_decorated": false,
+  "window_x": 651,
+  "window_y": 300,
+  "window_width": 1188,
+  "window_height": 957,
+  "title_bar_color": 0,
+  "opacity": 0,
+  "debug_mode": false,
+  "auto_start": false,
+  "minimize_to_tray": false,
+  "close_dialog_shown": false,
+  "groups": [
+    {
+      "name": "Default",
+      "shortcuts": null
+    }
+  ]
+}
