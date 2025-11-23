@@ -41,6 +41,7 @@ go build -ldflags "-H windowsgui -s -w" -trimpath -o GoMuseTool.exe .
 
 > *注：`-H windowsgui` 标志用于隐藏 Windows 上的命令行窗口；`-s -w` 用于减小可执行文件体积。*
 
+# 运行方式
 ## 源码运行
 1、进入目录
 
@@ -54,11 +55,16 @@ cd GoMuseTool
 go run .
 ```
 
+## 下载exe运行文件
+
+GoMuseTool_Windows_X64.exe
+
 ## 📦 依赖项
 
   * [Fyne](https://fyne.io/)：跨平台 GUI 工具包。
   * [sqweek/dialog](https://github.com/sqweek/dialog)：原生系统对话框支持。
   * [akavel/rsrc](https://github.com/akavel/rsrc)：用于嵌入 Windows 资源的工具。
+
 
 
 
