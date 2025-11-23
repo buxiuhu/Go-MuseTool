@@ -1,6 +1,11 @@
+
 # Go MuseTool
 
 Go MuseTool 是一款轻量级、可定制的应用启动器，使用 **Go 语言**和 **Fyne** 跨平台 GUI 工具包开发。它具备现代化的用户界面、群组管理功能，并支持系统托盘集成。
+
+## 预览图
+<img width="1172" height="469" alt="image" src="https://github.com/user-attachments/assets/98ab3494-3a4d-4ed0-b030-65efb0a1a445" />
+
 
 ## 🚀 主要功能
 
@@ -54,6 +59,7 @@ go run .
   * [Fyne](https://fyne.io/)：跨平台 GUI 工具包。
   * [sqweek/dialog](https://github.com/sqweek/dialog)：原生系统对话框支持。
   * [akavel/rsrc](https://github.com/akavel/rsrc)：用于嵌入 Windows 资源的工具。
+
 
 
 
