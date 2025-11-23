@@ -55,12 +55,5 @@ go run .
   * [sqweek/dialog](https://github.com/sqweek/dialog)：原生系统对话框支持。
   * [akavel/rsrc](https://github.com/akavel/rsrc)：用于嵌入 Windows 资源的工具。
 
-## 📜 许可证
-
-[MIT 许可证](https://www.google.com/search?q=LICENSE)
-
------
-
-您是否需要将这个中文版本用于 GitHub 仓库的 `README.md` 文件？我可以帮您检查 Markdown 格式或继续进行其他优化。
 
 
