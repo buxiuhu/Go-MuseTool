@@ -41,6 +41,8 @@
     "GroupNameEmpty": "分组名称不能为空",
     "ShortcutEdit": "编辑",
     "ShortcutDelete": "删除",
+    "ShortcutDeleteTitle": "删除快捷方式",
+    "ShortcutDeleteConfirm": "确定要删除快捷方式 '%s' 吗?",
     "ShortcutMoveTo": "移动到分组",
     "ShortcutAdd": "添加快捷方式",
     "ShortcutAddTitle": "添加新快捷方式",
@@ -73,5 +75,17 @@
     "CloseDialogMessage": "您点击了关闭按钮。您希望将程序最小化到系统托盘还是直接退出程序?",
     "CloseDialogMinimize": "最小化到托盘",
     "CloseDialogExit": "退出程序",
-    "CloseDialogRemember": "记住我的选择 (可在设置中更改)"
+    "CloseDialogRemember": "记住我的选择 (可在设置中更改)",
+    "SettingsResetCloseDialog": "重置关闭提示",
+    "SettingsResetCloseDialogDesc": "重置关闭应用时的提示对话框，下次关闭时将再次显示",
+    "SettingsDataManagement": "数据管理",
+    "SettingsExport": "导出配置",
+    "SettingsImport": "导入配置",
+    "SettingsExportSuccess": "配置导出成功",
+    "SettingsImportSuccess": "配置导入成功",
+    "SettingsImportError": "导入配置失败",
+    "AboutTitle": "关于",
+    "AboutVersion": "版本: %s",
+    "AboutAuthor": "作者: %s",
+    "AboutLink": "项目地址"
 }

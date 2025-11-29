@@ -54,13 +54,14 @@ func Setup(enableDebug bool) error {
 	mw := io.MultiWriter(os.Stdout, logFile)
 
 	// Initialize different loggers
-	infoLogger = log.New(mw, "[INFO] ", log.Ldate|log.Ltime)
-	errorLogger = log.New(mw, "[ERROR] ", log.Ldate|log.Ltime|log.Lshortfile)
+	// Format: 【LEVEL】YYYY/MM/DD HH:MM:SS message
+	infoLogger = log.New(mw, "【INFO】", log.Ldate|log.Ltime)
+	errorLogger = log.New(mw, "【ERROR】", log.Ldate|log.Ltime|log.Lshortfile)
 
 	if debugEnabled {
-		debugLogger = log.New(mw, "[DEBUG] ", log.Ldate|log.Ltime|log.Lshortfile)
+		debugLogger = log.New(mw, "【DEBUG】", log.Ldate|log.Ltime|log.Lshortfile)
 	} else {
-		debugLogger = log.New(io.Discard, "[DEBUG] ", log.Ldate|log.Ltime|log.Lshortfile)
+		debugLogger = log.New(io.Discard, "【DEBUG】", log.Ldate|log.Ltime|log.Lshortfile)
 	}
 
 	Info("Logging initialized. Writing to %s (Debug: %v)", logFilePath, debugEnabled)
@@ -88,7 +89,7 @@ func Info(format string, v ...interface{}) {
 	if infoLogger != nil {
 		infoLogger.Printf(format, v...)
 	} else {
-		log.Printf("[INFO] "+format, v...)
+		log.Printf("【INFO】"+format, v...)
 	}
 }
 
@@ -97,7 +98,7 @@ func Error(format string, v ...interface{}) {
 	if errorLogger != nil {
 		errorLogger.Printf(format, v...)
 	} else {
-		log.Printf("[ERROR] "+format, v...)
+		log.Printf("【ERROR】"+format, v...)
 	}
 }
 
@@ -118,10 +119,10 @@ func SetDebugEnabled(enabled bool) {
 	if logFile != nil {
 		mw := io.MultiWriter(os.Stdout, logFile)
 		if enabled {
-			debugLogger = log.New(mw, "[DEBUG] ", log.Ldate|log.Ltime|log.Lshortfile)
+			debugLogger = log.New(mw, "【DEBUG】", log.Ldate|log.Ltime|log.Lshortfile)
 			Info("Debug logging enabled")
 		} else {
-			debugLogger = log.New(io.Discard, "[DEBUG] ", log.Ldate|log.Ltime|log.Lshortfile)
+			debugLogger = log.New(io.Discard, "【DEBUG】", log.Ldate|log.Ltime|log.Lshortfile)
 			Info("Debug logging disabled")
 		}
 	}

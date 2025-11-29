@@ -30,6 +30,7 @@ type InteractiveContainer struct {
 	saveStateFunc func() // 保存状态的回调函数
 	saveTimer     *time.Timer
 	debugMode     bool
+	isHostFullscreen *bool // 宿主窗口是否处于全屏模式
 }
 
 func (c *InteractiveContainer) SetDebugMode(enabled bool) {
@@ -47,7 +48,31 @@ const (
 
 	SnapDistance     = 80 // 吸附到边缘的距离 (增加以提高灵活性)
 	VisibleEdge      = 0  // 隐藏后可见的像素边缘 (0 表示完全隐藏)
-	VisualAdjustment = 7  // 视觉校正偏移量 (用于消除 Windows 窗口阴影带来的视觉间隙)
+	VisualAdjustment = 8  // 视觉校正偏移量 (用于消除 Windows 窗口阴影带来的视觉间隙)
+
+	// BottomCenterZone 定义底部角落区域的大小（单位：像素）
+	// 用于区分底部的"角落区域"和"中间区域"，以解决任务栏预览窗口导致的闪烁问题
+	//
+	// 工作原理：
+	//   - 左下角：窗口左边缘距离屏幕左边缘 < BottomCenterZone
+	//   - 右下角：窗口右边缘距离屏幕右边缘 < BottomCenterZone
+	//   - 中间区域：不在左下角或右下角的底部区域
+	//
+	// 延迟策略：
+	//   - 角落区域：50ms 快速响应（任务栏图标稀疏，预览窗口少）
+	//   - 中间区域：300ms 延迟响应（任务栏图标密集，避免预览窗口干扰）
+	//
+	// 调整建议：
+	//   - 100-150：小角落，大中间区域（适合任务栏图标非常集中的情况）
+	//   - 200：默认值，平衡角落和中间区域
+	//   - 300-400：大角落，小中间区域（适合只有屏幕正中央需要延迟的情况）
+	//
+	// 示例（假设屏幕宽度1920px）：
+	//   BottomCenterZone = 200
+	//   - 左下角：0-200px
+	//   - 中间区域：200-1720px
+	//   - 右下角：1720-1920px
+	BottomCenterZone = 200
 )
 
 // NewInteractiveContainer creates a new container with the given window and content.
@@ -79,6 +104,38 @@ func (c *InteractiveContainer) MouseIn(e *desktop.MouseEvent) {
 
 // MouseOut implements the desktop.Hoverable interface.
 func (c *InteractiveContainer) MouseOut() {
+	// 如果窗口处于全屏模式，则不执行任何操作
+	if c.window.FullScreen() {
+		return
+	}
+
+	// 增强全屏检测，通过Windows API检查窗口是否真正处于全屏状态
+	hwnd := GetWindowHandle(language.T().WindowTitle)
+	if hwnd != 0 {
+		// 检查窗口是否最大化
+		if IsWindowMaximized(hwnd) {
+			return
+		}
+		
+		// 获取窗口和屏幕信息
+		wx, wy, ww, wh := GetWindowRect(hwnd)
+		screenW, screenH := GetScreenSize()
+		
+		// 如果窗口尺寸接近全屏尺寸，则认为是全屏状态
+		if ww >= screenW && wh >= screenH {
+			return
+		}
+		
+		// 检查窗口位置是否覆盖了整个屏幕（考虑任务栏）
+		waLeft, waTop, waRight, waBottom := GetWorkArea()
+		workAreaWidth := waRight - waLeft
+		workAreaHeight := waBottom - waTop
+		
+		if ww >= workAreaWidth && wh >= workAreaHeight && wx <= waLeft && wy <= waTop {
+			return
+		}
+	}
+
 	c.mutex.Lock()
 	dockSide := c.dockSide
 	c.mutex.Unlock()
@@ -86,7 +143,29 @@ func (c *InteractiveContainer) MouseOut() {
 	// 只有当窗口已经吸附到边缘时，才在鼠标离开时隐藏窗口
 	if dockSide != DockNone {
 		go func() {
-			time.Sleep(50 * time.Millisecond)
+			// 底部居中位置使用更长延迟，避免任务栏预览窗口干扰
+			// 左下角和右下角保持快速响应
+			delay := 50 * time.Millisecond
+
+			if dockSide == DockBottom {
+				// 检查窗口是否在底部中间区域（非角落）
+				hwnd := GetWindowHandle(language.T().WindowTitle)
+				if hwnd != 0 {
+					x, _, w, _ := GetWindowRect(hwnd)
+					waLeft, _, waRight, _ := GetWorkArea()
+
+					// 定义角落区域：距离左右边缘 BottomCenterZone 像素以内
+					isLeftCorner := x < waLeft+BottomCenterZone
+					isRightCorner := x+w > waRight-BottomCenterZone
+
+					// 只有在中间区域才使用长延迟
+					if !isLeftCorner && !isRightCorner {
+						delay = 300 * time.Millisecond
+					}
+				}
+			}
+
+			time.Sleep(delay)
 
 			hwnd := GetWindowHandle(language.T().WindowTitle)
 			if hwnd == 0 {
@@ -147,9 +226,43 @@ func (c *InteractiveContainer) showWindow() {
 		c.mutex.Unlock()
 		return
 	}
+	
+	// 检查窗口是否处于全屏状态
+	if c.window.FullScreen() {
+		c.mutex.Unlock()
+		return
+	}
+	
+	// 通过Windows API进一步检查窗口是否处于全屏状态
+	// 检查窗口是否最大化
+	if IsWindowMaximized(hwnd) {
+		c.mutex.Unlock()
+		return
+	}
+	
+	// 获取窗口和屏幕信息
+	wx, wy, ww, wh := GetWindowRect(hwnd)
+	screenW, screenH := GetScreenSize()
+	
+	// 如果窗口尺寸接近全屏尺寸，则认为是全屏状态
+	if ww >= screenW && wh >= screenH {
+		c.mutex.Unlock()
+		return
+	}
+	
+	// 检查窗口位置是否覆盖了整个屏幕（考虑任务栏）
+	waLeft, waTop, waRight, waBottom := GetWorkArea()
+	workAreaWidth := waRight - waLeft
+	workAreaHeight := waBottom - waTop
+	
+	if ww >= workAreaWidth && wh >= workAreaHeight && wx <= waLeft && wy <= waTop {
+		c.mutex.Unlock()
+		return
+	}
+
 	x, y, w, h := GetWindowRect(hwnd)
 
-	waLeft, waTop, waRight, waBottom := GetWorkArea()
+	waLeft, waTop, waRight, waBottom = GetWorkArea()
 
 	// 根据 dockSide 恢复到正确的可见位置
 	// 左右两侧应用 VisualAdjustment 以消除视觉间隙
@@ -163,11 +276,11 @@ func (c *InteractiveContainer) showWindow() {
 	// 左右两侧应用 VisualAdjustment 以消除视觉间隙
 	switch dockSide {
 	case DockTop:
-		SetWindowPos(hwnd, x, waTop)
-		log.Printf("showWindow: DockTop, moving to (%d, %d)", x, waTop)
+		SetWindowPos(hwnd, x, waTop-VisualAdjustment)
+		log.Printf("showWindow: DockTop, moving to (%d, %d)", x, waTop-VisualAdjustment)
 	case DockBottom:
-		SetWindowPos(hwnd, x, waBottom-h)
-		log.Printf("showWindow: DockBottom, moving to (%d, %d)", x, waBottom-h)
+		SetWindowPos(hwnd, x, waBottom-h+8)
+		log.Printf("showWindow: DockBottom, moving to (%d, %d)", x, waBottom-h+8)
 	case DockLeft:
 		SetWindowPos(hwnd, waLeft-VisualAdjustment, y)
 		log.Printf("showWindow: DockLeft, moving to (%d, %d)", waLeft-VisualAdjustment, y)
@@ -210,8 +323,38 @@ func (c *InteractiveContainer) checkAndHide() {
 	if hwnd == 0 {
 		return
 	}
-	x, y, w, h := GetWindowRect(hwnd)
+	
+	// 检查窗口是否处于全屏状态
+	if c.window.FullScreen() {
+		return
+	}
+	
+	// 通过Windows API进一步检查窗口是否处于全屏状态
+	// 检查窗口是否最大化
+	if IsWindowMaximized(hwnd) {
+		return
+	}
+	
+	// 获取窗口和屏幕信息
+	wx, wy, ww, wh := GetWindowRect(hwnd)
+	screenW, screenH := GetScreenSize()
+	
+	// 如果窗口尺寸接近全屏尺寸，则认为是全屏状态
+	if ww >= screenW && wh >= screenH {
+		return
+	}
+	
+	// 检查窗口位置是否覆盖了整个屏幕（考虑任务栏）
 	waLeft, waTop, waRight, waBottom := GetWorkArea()
+	workAreaWidth := waRight - waLeft
+	workAreaHeight := waBottom - waTop
+	
+	if ww >= workAreaWidth && wh >= workAreaHeight && wx <= waLeft && wy <= waTop {
+		return
+	}
+
+	x, y, w, h := GetWindowRect(hwnd)
+	waLeft, waTop, waRight, waBottom = GetWorkArea()
 
 	if c.dockSide == DockNone {
 		// 优先检查左右边缘，这样高窗口会优先识别为左右停靠
@@ -286,8 +429,8 @@ func (c *InteractiveContainer) startPollingLocked() {
 				c.mutex.Unlock()
 
 				shouldShow := false
-				// 触发区域：鼠标移动到边缘 10px 范围内即可唤出 (增加灵敏度)
-				triggerZone := 10
+				// 触发区域：鼠标移动到边缘 20px 范围内即可唤出 (增加灵敏度)
+				triggerZone := 20
 
 				switch dockSide {
 				case DockTop:
@@ -330,6 +473,38 @@ func (c *InteractiveContainer) startPositionCheck() {
 }
 
 func (c *InteractiveContainer) checkPosition() {
+	// 如果窗口处于全屏模式，则完全跳过所有位置检查和自动隐藏逻辑
+	if c.window.FullScreen() {
+		return
+	}
+
+	// 通过Windows API进一步检查窗口是否处于全屏状态
+	hwnd := GetWindowHandle(language.T().WindowTitle)
+	if hwnd != 0 {
+		// 检查窗口是否最大化
+		if IsWindowMaximized(hwnd) {
+			return
+		}
+		
+		// 获取窗口和屏幕信息
+		wx, wy, ww, wh := GetWindowRect(hwnd)
+		screenW, screenH := GetScreenSize()
+		
+		// 如果窗口尺寸接近全屏尺寸，则认为是全屏状态
+		if ww >= screenW && wh >= screenH {
+			return
+		}
+		
+		// 检查窗口位置是否覆盖了整个屏幕（考虑任务栏）
+		waLeft, waTop, waRight, waBottom := GetWorkArea()
+		workAreaWidth := waRight - waLeft
+		workAreaHeight := waBottom - waTop
+		
+		if ww >= workAreaWidth && wh >= workAreaHeight && wx <= waLeft && wy <= waTop {
+			return
+		}
+	}
+
 	// 1. Fast check for hidden state
 	c.mutex.Lock()
 	if c.isHidden {
@@ -339,9 +514,11 @@ func (c *InteractiveContainer) checkPosition() {
 	c.mutex.Unlock()
 
 	// 2. System calls (slow, do not hold lock)
-	hwnd := GetWindowHandle(language.T().WindowTitle)
 	if hwnd == 0 {
-		return
+		hwnd = GetWindowHandle(language.T().WindowTitle)
+		if hwnd == 0 {
+			return
+		}
 	}
 
 	x, y, w, h := GetWindowRect(hwnd)
@@ -378,9 +555,14 @@ func (c *InteractiveContainer) checkPosition() {
 					targetX = waLeft - VisualAdjustment
 					shouldSnap = true
 				}
-				// Enforce bottom boundary for DockLeft
-				if y+h > waBottom {
-					targetY = waBottom - h
+				// Corner Snap: Bottom-Left - 当接近底部时强制吸附
+				if y+h >= waBottom-SnapDistance {
+					if y != waBottom-h+8 {
+						targetY = waBottom - h + 8
+						shouldSnap = true
+					}
+				} else if y+h > waBottom+8 {
+					targetY = waBottom - h + 8
 					shouldSnap = true
 				}
 			case DockRight:
@@ -388,19 +570,24 @@ func (c *InteractiveContainer) checkPosition() {
 					targetX = waRight - w + VisualAdjustment
 					shouldSnap = true
 				}
-				// Enforce bottom boundary for DockRight
-				if y+h > waBottom {
-					targetY = waBottom - h
+				// Corner Snap: Bottom-Right - 当接近底部时强制吸附
+				if y+h >= waBottom-SnapDistance {
+					if y != waBottom-h+8 {
+						targetY = waBottom - h + 8
+						shouldSnap = true
+					}
+				} else if y+h > waBottom+8 {
+					targetY = waBottom - h + 8
 					shouldSnap = true
 				}
 			case DockTop:
-				if y != waTop {
-					targetY = waTop
+				if y != waTop-VisualAdjustment {
+					targetY = waTop - VisualAdjustment
 					shouldSnap = true
 				}
 			case DockBottom:
-				if y != waBottom-h {
-					targetY = waBottom - h
+				if y != waBottom-h+8 {
+					targetY = waBottom - h + 8
 					shouldSnap = true
 				}
 			}

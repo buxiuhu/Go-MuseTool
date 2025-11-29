@@ -10,6 +10,8 @@ var (
 	procFindWindowW   = user32.NewProc("FindWindowW")
 	procSetWindowPos  = user32.NewProc("SetWindowPos")
 	procGetWindowRect = user32.NewProc("GetWindowRect")
+	procGetWindowLong = user32.NewProc("GetWindowLongW")
+	procSetWindowLong = user32.NewProc("SetWindowLongW")
 
 	// DWM API for title bar color
 	dwmapi                    = syscall.NewLazyDLL("dwmapi.dll")
@@ -29,18 +31,21 @@ var (
 )
 
 const (
-	GWL_STYLE        = -16
-	WS_CAPTION       = 0x00C00000
-	WS_THICKFRAME    = 0x00040000
-	WS_MAXIMIZE      = 0x01000000
-	SWP_NOSIZE       = 0x0001
-	SWP_NOMOVE       = 0x0002
-	SWP_NOZORDER     = 0x0004
-	SWP_FRAMECHANGED = 0x0020
-	WS_SYSMENU       = 0x00080000
-	HWND_TOPMOST     = -1
-	HWND_NOTOPMOST   = -2
-	SWP_NOACTIVATE   = 0x0010
+	GWL_STYLE           = -16
+	GWL_EXSTYLE         = -20
+	WS_CAPTION          = 0x00C00000
+	WS_THICKFRAME       = 0x00040000
+	WS_MAXIMIZE         = 0x01000000
+	WS_POPUP            = 0x80000000
+	WS_OVERLAPPEDWINDOW = 0x00CF0000
+	SWP_NOSIZE          = 0x0001
+	SWP_NOMOVE          = 0x0002
+	SWP_NOZORDER        = 0x0004
+	SWP_FRAMECHANGED    = 0x0020
+	WS_SYSMENU          = 0x00080000
+	HWND_TOPMOST        = -1
+	HWND_NOTOPMOST      = -2
+	SWP_NOACTIVATE      = 0x0010
 )
 
 // DWM constants
@@ -84,6 +89,16 @@ func ResizeWindow(hwnd uintptr, w, h int) {
 
 func MoveAndResizeWindow(hwnd uintptr, x, y, w, h int) {
 	procSetWindowPos.Call(hwnd, 0, uintptr(x), uintptr(y), uintptr(w), uintptr(h), SWP_NOZORDER)
+}
+
+func GetWindowLong(hwnd uintptr, nIndex int) uintptr {
+	ret, _, _ := procGetWindowLong.Call(hwnd, uintptr(nIndex))
+	return ret
+}
+
+func SetWindowLong(hwnd uintptr, nIndex int, dwNewLong uintptr) uintptr {
+	ret, _, _ := procSetWindowLong.Call(hwnd, uintptr(nIndex), dwNewLong)
+	return ret
 }
 
 // SetTitleBarColor 使用 DWM API 设置标题栏颜色
@@ -226,12 +241,7 @@ func IsSystemDarkMode() bool {
 
 // IsWindowMaximized 检测窗口是否处于最大化状态
 func IsWindowMaximized(hwnd uintptr) bool {
-	procGetWindowLong := user32.NewProc("GetWindowLongW")
-
-	// GWL_STYLE = -16
-	gwlStyle := ^uintptr(15) // -16 in two's complement
-	style, _, _ := procGetWindowLong.Call(hwnd, gwlStyle)
-
+	style := GetWindowLong(hwnd, GWL_STYLE)
 	// 检查 WS_MAXIMIZE 标志
 	return (style & WS_MAXIMIZE) != 0
 }
@@ -250,24 +260,35 @@ func SetWindowOpacity(hwnd uintptr, opacity float64) {
 	alpha := uint8(opacity * 255)
 
 	const (
-		GWL_EXSTYLE   = -20
 		WS_EX_LAYERED = 0x00080000
 		LWA_ALPHA     = 0x00000002
 	)
 
-	procGetWindowLong := user32.NewProc("GetWindowLongW")
-	procSetWindowLong := user32.NewProc("SetWindowLongW")
 	procSetLayeredWindowAttributes := user32.NewProc("SetLayeredWindowAttributes")
 
-	// Get current extended style (GWL_EXSTYLE = -20)
-	gwlExStyle := ^uintptr(19) // -20 in two's complement
-	exStyle, _, _ := procGetWindowLong.Call(hwnd, gwlExStyle)
+	// Get current extended style
+	exStyle := GetWindowLong(hwnd, GWL_EXSTYLE)
 
 	// Add WS_EX_LAYERED style if not present
 	if exStyle&WS_EX_LAYERED == 0 {
-		procSetWindowLong.Call(hwnd, gwlExStyle, exStyle|WS_EX_LAYERED)
+		SetWindowLong(hwnd, GWL_EXSTYLE, exStyle|WS_EX_LAYERED)
 	}
 
 	// Set the opacity
 	procSetLayeredWindowAttributes.Call(hwnd, 0, uintptr(alpha), LWA_ALPHA)
+}
+
+// SetWindowNoTaskbar 设置窗口不在任务栏显示
+func SetWindowNoTaskbar(hwnd uintptr) {
+	const (
+		WS_EX_TOOLWINDOW = 0x00000080
+		WS_EX_APPWINDOW  = 0x00040000
+	)
+
+	// Get current extended style
+	exStyle := GetWindowLong(hwnd, GWL_EXSTYLE)
+
+	// Add WS_EX_TOOLWINDOW style and remove WS_EX_APPWINDOW to prevent showing in taskbar
+	newStyle := (exStyle | WS_EX_TOOLWINDOW) &^ WS_EX_APPWINDOW
+	SetWindowLong(hwnd, GWL_EXSTYLE, newStyle)
 }

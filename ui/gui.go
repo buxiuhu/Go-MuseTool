@@ -9,6 +9,8 @@ import (
 	"go-musetool/storage"
 	"image/color"
 	"log"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -24,14 +26,26 @@ import (
 )
 
 type LauncherApp struct {
-	App                fyne.App
-	Window             fyne.Window
-	Config             *model.Config
-	ConfigPath         string
-	CurrentGroup       string
-	SettingsWindow     fyne.Window // 设置窗口引用
-	ShortcutWindow     fyne.Window // 快捷方式窗口引用
-	MainWindowIconData []byte      // 主窗口图标数据（与托盘共用）
+	App                        fyne.App
+	Window                     fyne.Window
+	Config                     *model.Config
+	ConfigPath                 string
+	CurrentGroup               string
+	SettingsWindow             fyne.Window // 设置窗口引用
+	ShortcutWindow             fyne.Window // 快捷方式窗口引用
+	AddGroupWindow             fyne.Window // 新增分组窗口引用
+	EditGroupWindow            fyne.Window // 编辑分组窗口引用
+	DeleteGroupWindow          fyne.Window // 删除分组窗口引用
+	EditGroupDialogForWindow   fyne.Window // 编辑分组对话框(For)窗口引用
+	DeleteGroupDialogForWindow fyne.Window // 删除分组对话框(For)窗口引用
+	DeleteShortcutWindow       fyne.Window // 删除快捷方式确认窗口引用
+	AboutWindow                fyne.Window // 关于窗口引用
+	MainWindowIconData         []byte
+	isTrueFullscreen           bool
+	preFullscreenState         struct {
+		x, y, w, h int
+		style      uintptr
+	}
 }
 
 // SetMainWindowIconData 设置主窗口图标数据
@@ -71,6 +85,42 @@ func (l *LauncherApp) getTitleBarColor() (uint8, uint8, uint8) {
 	return r, g, b
 }
 
+// applyWindowStyle 应用窗口样式（置顶 + 标题栏颜色）
+func (l *LauncherApp) applyWindowStyle(windowTitle string) {
+	// 如果主窗口处于全屏模式，则不应用任何样式更改
+	if l.Window != nil && l.Window.FullScreen() {
+		return
+	}
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		hwnd := GetWindowHandle(windowTitle)
+		if hwnd != 0 {
+			// 设置窗口总在最上层（先关闭再打开以确保正确的z-order）
+			SetWindowAlwaysOnTop(hwnd, false)
+			SetWindowAlwaysOnTop(hwnd, true)
+
+			// 根据当前主题设置标题栏颜色
+			var color uint32
+			switch l.Config.ThemePreference {
+			case model.ThemeDark:
+				color = 0x202020 // 深灰色
+			case model.ThemeLight:
+				color = 0xF0F0F0 // 浅灰色
+			default:
+				if IsSystemDarkMode() {
+					color = 0x202020
+				} else {
+					color = 0xF0F0F0
+				}
+			}
+			SetTitleBarColor(hwnd, color)
+
+			// 设置窗口不在任务栏显示
+			SetWindowNoTaskbar(hwnd)
+		}
+	}()
+}
+
 func NewLauncherApp(config *model.Config, configPath string, iconData []byte) *LauncherApp {
 	log.Println("creating fyne app...")
 	a := app.New()
@@ -96,13 +146,58 @@ func NewLauncherApp(config *model.Config, configPath string, iconData []byte) *L
 	w := a.NewWindow(language.T().WindowTitle)
 	l.Window = w
 
+	/* w.SetOnFullScreenChanged(func(fullscreen bool) {
+		hwnd := GetWindowHandle(language.T().WindowTitle)
+		if hwnd == 0 {
+			return
+		}
+
+		if fullscreen {
+			// Entering true fullscreen
+			l.isTrueFullscreen = true
+
+			// Save original window style and rect
+			x, y, w, h := GetWindowRect(hwnd)
+			l.preFullscreenState.x = x
+			l.preFullscreenState.y = y
+			l.preFullscreenState.w = w
+			l.preFullscreenState.h = h
+			l.preFullscreenState.style = GetWindowLong(hwnd, GWL_STYLE)
+
+			// Get screen dimensions for the current monitor
+			screenWidth, screenHeight := GetScreenSize()
+
+			// Change window style to a borderless popup
+			SetWindowLong(hwnd, GWL_STYLE, l.preFullscreenState.style&^WS_OVERLAPPEDWINDOW|WS_POPUP)
+
+			// Use SetWindowPos to resize, move, and set topmost in one atomic call
+			procSetWindowPos.Call(hwnd, uintptr(HWND_TOPMOST), uintptr(0), uintptr(0), uintptr(screenWidth), uintptr(screenHeight), SWP_FRAMECHANGED)
+
+		} else {
+			// Exiting true fullscreen
+			if !l.isTrueFullscreen {
+				return
+			}
+			l.isTrueFullscreen = false
+
+			// Restore original window style
+			SetWindowLong(hwnd, GWL_STYLE, l.preFullscreenState.style)
+
+			// Restore original window size, position, and Z-order
+			procSetWindowPos.Call(hwnd, uintptr(HWND_NOTOPMOST), uintptr(l.preFullscreenState.x), uintptr(l.preFullscreenState.y), uintptr(l.preFullscreenState.w), uintptr(l.preFullscreenState.h), SWP_FRAMECHANGED)
+		}
+	}) */
+
 	// 2. 设置系统托盘 (使用原生 Windows API 以支持左键点击)
 	// 注意: 我们不再使用 Fyne 的 desk.SetSystemTrayMenu，而是使用自定义的 InitTray
-	// 使用与主窗口相同的图标数据，确保托盘图标和主窗口图标一致
+	// 使用与主窗口相同的图标数据,确保托盘图标和主窗口图标一致
 	InitTrayWithData(l.getMainWindowIconData(), func() {
 		// OnShow callback (Left click or Menu Show)
-		l.Window.Show()
-		l.Window.RequestFocus()
+		// 必须在UI线程中调用Fyne的UI操作
+		fyne.Do(func() {
+			l.Window.Show()
+			l.Window.RequestFocus()
+		})
 	}, func() {
 		// OnExit callback (Menu Exit)
 		l.saveWindowState()
@@ -143,48 +238,72 @@ func NewLauncherApp(config *model.Config, configPath string, iconData []byte) *L
 
 			// 使用 WinAPI 同时设置位置和大小
 			MoveAndResizeWindow(hwnd, x, y, w, h)
-
-			// 启动定期强制置顶的 goroutine
-			go func() {
-				ticker := time.NewTicker(1 * time.Second)
-				for range ticker.C {
-					// 检查设置窗口是否存在
-					settingsHwnd := GetWindowHandle(language.T().SettingsTitle)
-					// 检查快捷方式窗口是否存在（添加或编辑）
-					shortcutAddHwnd := GetWindowHandle(language.T().ShortcutAddTitle)
-					shortcutEditHwnd := GetWindowHandle(language.T().ShortcutEditTitle)
-
-					// 只有在设置窗口和快捷方式窗口都不存在时，才强制主窗口置顶
-					if settingsHwnd == 0 && shortcutAddHwnd == 0 && shortcutEditHwnd == 0 {
-						if hwnd := GetWindowHandle(language.T().WindowTitle); hwnd != 0 {
-							SetWindowAlwaysOnTop(hwnd, true)
-						}
-					}
-				}
-			}()
-
 		}()
 	} else {
-		w.Resize(fyne.NewSize(900, 700))
+		// No valid window geometry, use default size
+		w.Resize(fyne.NewSize(800, 600))
 		w.CenterOnScreen()
 	}
 
-	// 6. 设置窗口关闭时保存状态
+	// 启动定期强制置顶的 goroutine (独立于窗口位置恢复逻辑)
+	go func() {
+		ticker := time.NewTicker(200 * time.Millisecond) // 提高检查频率以获得更好的响应性
+		for range ticker.C {
+			// 如果窗口处于全屏模式，则跳过所有置顶逻辑
+			if l.Window != nil && l.Window.FullScreen() {
+				continue
+			}
+
+			// 检查是否有任何子窗口存在 (使用内部引用而不是系统调用)
+			hasChildWindow := l.SettingsWindow != nil ||
+				l.ShortcutWindow != nil ||
+				l.AddGroupWindow != nil ||
+				l.EditGroupWindow != nil ||
+				l.DeleteGroupWindow != nil ||
+				l.EditGroupDialogForWindow != nil ||
+				l.DeleteGroupDialogForWindow != nil ||
+				l.DeleteShortcutWindow != nil ||
+				l.AboutWindow != nil
+
+			// 获取主窗口句柄
+			mainHwnd := GetWindowHandle(language.T().WindowTitle)
+			if mainHwnd == 0 {
+				continue
+			}
+
+			if hasChildWindow {
+				// 如果有子窗口存在，显式禁用主窗口的置顶状态
+				SetWindowAlwaysOnTop(mainHwnd, false)
+			} else {
+				// 只有在所有子窗口都不存在时，才强制主窗口置顶
+				SetWindowAlwaysOnTop(mainHwnd, true)
+			}
+		}
+	}()
+
+	// 3. 设置窗口关闭事件处理
+	// 使用 SetCloseIntercept 而不是 SetOnClosed,避免递归调用问题
 	w.SetCloseIntercept(func() {
-		// 如果已经显示过关闭对话框，或者用户已经配置了最小化到托盘(意味着已经做出了选择)
+		// 使用 logger.Debug 代替直接写入标准输出,避免非调试模式下的噪音
+		logger.Debug("SetCloseIntercept: CloseDialogShown=%v", l.Config.CloseDialogShown)
+
+		// 如果用户已经选择过行为,直接执行
 		if l.Config.CloseDialogShown {
+			logger.Debug("Dialog already shown, executing direct action. MinimizeToTray=%v", l.Config.MinimizeToTray)
 			if l.Config.MinimizeToTray {
-				// 最小化到托盘而不是退出
+				// 最小化到托盘
 				l.Window.Hide()
 			} else {
-				// 完全退出
+				// 退出程序
 				l.saveWindowState()
-				w.Close()
+				l.App.Quit()
 			}
 			return
 		}
 
-		// 显示首次关闭对话框
+		// 首次关闭,显示选择对话框
+		logger.Debug("SetCloseIntercept: Showing close dialog for first time")
+
 		rememberCheck := widget.NewCheck(language.T().CloseDialogRemember, func(b bool) {})
 		rememberCheck.SetChecked(true) // 默认选中记住
 
@@ -196,6 +315,7 @@ func NewLauncherApp(config *model.Config, configPath string, iconData []byte) *L
 			container.NewHBox(
 				layout.NewSpacer(),
 				widget.NewButton(language.T().CloseDialogMinimize, func() {
+					logger.Debug("SetCloseIntercept: User selected Minimize to Tray")
 					if rememberCheck.Checked {
 						l.Config.CloseDialogShown = true
 						l.Config.MinimizeToTray = true
@@ -206,6 +326,7 @@ func NewLauncherApp(config *model.Config, configPath string, iconData []byte) *L
 					l.Window.Hide()
 				}),
 				widget.NewButton(language.T().CloseDialogExit, func() {
+					logger.Debug("SetCloseIntercept: User selected Exit")
 					if rememberCheck.Checked {
 						l.Config.CloseDialogShown = true
 						l.Config.MinimizeToTray = false
@@ -214,7 +335,7 @@ func NewLauncherApp(config *model.Config, configPath string, iconData []byte) *L
 					closeDialog.Hide()
 					// 执行退出
 					l.saveWindowState()
-					w.Close()
+					l.App.Quit()
 				}),
 				layout.NewSpacer(),
 			),
@@ -222,17 +343,14 @@ func NewLauncherApp(config *model.Config, configPath string, iconData []byte) *L
 
 		closeDialog = dialog.NewCustom(
 			language.T().CloseDialogTitle,
-			language.T().Cancel, // 这里我们不使用默认按钮，而是自定义按钮，但Fyne dialog需要一个dismiss按钮
+			language.T().Cancel,
 			content,
 			w,
 		)
-		// 隐藏默认的按钮，因为我们自定义了按钮
-		// Fyne的dialog API比较受限，NewCustom会自带一个按钮。
-		// 我们可以使用 ShowCustom 并且不提供 callback，或者忽略那个按钮。
-		// 但为了更好的体验，我们可能需要构建一个无边框的 Window 或者使用 Overlay。
-		// 简单的做法是：让"Cancel"按钮作为"取消关闭"的操作。
 		closeDialog.SetDismissText(language.T().Cancel)
+		logger.Debug("SetCloseIntercept: About to show close dialog")
 		closeDialog.Show()
+		logger.Debug("SetCloseIntercept: Close dialog shown")
 	})
 
 	log.Println("setting up ui content...")
@@ -309,6 +427,17 @@ func (l *LauncherApp) applyTheme() {
 				}
 				SetWindowOpacity(hwnd, opacity)
 				log.Printf("applied window opacity: %.2f", opacity)
+
+				// 如果窗口不是全屏模式，则设置主窗口不在任务栏显示，避免与全屏模式冲突
+				if !l.Window.FullScreen() {
+					SetWindowNoTaskbar(hwnd)
+					log.Printf("SetWindowNoTaskbar applied (not fullscreen)")
+				} else {
+					log.Printf("SetWindowNoTaskbar skipped (fullscreen)")
+				}
+
+				// 确保窗口置顶
+				SetWindowAlwaysOnTop(hwnd, true)
 			}
 		}()
 	}
@@ -568,6 +697,7 @@ func (l *LauncherApp) setupUI() {
 		widget.NewToolbarAction(theme.DeleteIcon(), func() { l.showDeleteGroupDialog() }),
 		widget.NewToolbarSeparator(),
 		widget.NewToolbarAction(theme.SettingsIcon(), func() { l.showSettingsDialog() }),
+		widget.NewToolbarAction(theme.HelpIcon(), func() { l.showAboutDialog() }),
 		widget.NewToolbarSpacer(),
 	)
 
@@ -607,7 +737,7 @@ func (l *LauncherApp) createGroupContent(group model.Group) fyne.CanvasObject {
 			// 构建菜单项
 			menuItems := []*fyne.MenuItem{
 				fyne.NewMenuItem(language.T().ShortcutEdit, func() { l.showShortcutDialog(&shortcut) }),
-				fyne.NewMenuItem(language.T().ShortcutDelete, func() { l.deleteShortcut(group.Name, shortcut.Name) }),
+				fyne.NewMenuItem(language.T().ShortcutDelete, func() { l.showDeleteShortcutDialog(group.Name, shortcut.Name) }),
 			}
 
 			// 如果有多个分组，添加"移动到分组"子菜单
@@ -682,9 +812,18 @@ func (l *LauncherApp) createGroupContent(group model.Group) fyne.CanvasObject {
 
 // showSettingsDialog 用于主题配置
 func (l *LauncherApp) showSettingsDialog() {
+	// Ensure single settings window
+	if l.SettingsWindow != nil {
+		// 重新应用窗口样式确保置顶
+		l.applyWindowStyle(language.T().SettingsTitle)
+		l.SettingsWindow.Show()
+		l.SettingsWindow.RequestFocus()
+		return
+	}
+
 	// Theme Settings
 	themeOptions := []string{language.T().ThemeSystem, language.T().ThemeLight, language.T().ThemeDark}
-	themeRadio := widget.NewRadioGroup(themeOptions, func(selected string) {})
+	themeSelect := widget.NewSelect(themeOptions, func(selected string) {})
 	currentTheme := l.Config.ThemePreference
 	if currentTheme == "" {
 		currentTheme = model.ThemeSystem
@@ -692,11 +831,11 @@ func (l *LauncherApp) showSettingsDialog() {
 	// Map internal values to display values
 	switch currentTheme {
 	case model.ThemeSystem:
-		themeRadio.SetSelected(language.T().ThemeSystem)
+		themeSelect.SetSelected(language.T().ThemeSystem)
 	case model.ThemeLight:
-		themeRadio.SetSelected(language.T().ThemeLight)
+		themeSelect.SetSelected(language.T().ThemeLight)
 	case model.ThemeDark:
-		themeRadio.SetSelected(language.T().ThemeDark)
+		themeSelect.SetSelected(language.T().ThemeDark)
 	}
 
 	// Tab Position Settings
@@ -716,20 +855,18 @@ func (l *LauncherApp) showSettingsDialog() {
 
 	// Language Settings
 	langOptions := []string{"English", "中文"}
-	langRadio := widget.NewRadioGroup(langOptions, func(selected string) {})
+	langSelect := widget.NewSelect(langOptions, func(selected string) {})
 	if l.Config.Language == "zh" {
-		langRadio.SetSelected("中文")
+		langSelect.SetSelected("中文")
 	} else {
-		langRadio.SetSelected("English")
+		langSelect.SetSelected("English")
 	}
 
 	// Create independent window for settings
 	settingsWin := l.App.NewWindow(language.T().SettingsTitle)
-	settingsWin.Resize(fyne.NewSize(500, 700))
+	settingsWin.Resize(fyne.NewSize(300, 650))
 	settingsWin.CenterOnScreen()
-	if l.App.Icon() != nil {
-		settingsWin.SetIcon(l.App.Icon())
-	}
+	settingsWin.SetIcon(nil)
 
 	// Opacity Settings
 	currentOpacity := l.Config.Opacity
@@ -741,9 +878,7 @@ func (l *LauncherApp) showSettingsDialog() {
 	opacitySlider.Step = 0.05
 
 	opacityLabel := widget.NewLabel(fmt.Sprintf(language.T().SettingsOpacity, currentOpacity*100))
-	opacityHint := widget.NewLabel(language.T().SettingsOpacityHint)
-	opacityHint.TextStyle = fyne.TextStyle{Italic: true}
-	opacityHint.Wrapping = fyne.TextWrapWord
+	// opacityHint removed - no longer displayed
 
 	// Update opacity slider callback - set this BEFORE setting the value
 	opacitySlider.OnChanged = func(value float64) {
@@ -761,29 +896,7 @@ func (l *LauncherApp) showSettingsDialog() {
 	opacitySlider.SetValue(currentOpacity)
 
 	// Apply current theme to settings window
-	go func() {
-		time.Sleep(150 * time.Millisecond)
-		hwnd := GetWindowHandle(language.T().SettingsTitle)
-		if hwnd != 0 {
-			SetWindowAlwaysOnTop(hwnd, false)
-			SetWindowAlwaysOnTop(hwnd, true)
-
-			var color uint32
-			switch l.Config.ThemePreference {
-			case model.ThemeDark:
-				color = 0x202020
-			case model.ThemeLight:
-				color = 0xF0F0F0
-			default:
-				if IsSystemDarkMode() {
-					color = 0x202020
-				} else {
-					color = 0xF0F0F0
-				}
-			}
-			SetTitleBarColor(hwnd, color)
-		}
-	}()
+	l.applyWindowStyle(language.T().SettingsTitle)
 
 	// Debug Mode
 	debugCheck := widget.NewCheck(language.T().SettingsDebugLog, func(checked bool) {})
@@ -797,31 +910,113 @@ func (l *LauncherApp) showSettingsDialog() {
 	minimizeToTrayCheck := widget.NewCheck(language.T().SettingsMinimizeToTray, func(checked bool) {})
 	minimizeToTrayCheck.SetChecked(l.Config.MinimizeToTray)
 
+	// Reset Close Dialog Button
+	// resetCloseDialogDesc removed - no longer displayed
+
+	resetCloseDialogBtn := widget.NewButton(language.T().SettingsResetCloseDialog, func() {
+		l.Config.CloseDialogShown = false
+		if err := storage.SaveConfig(l.ConfigPath, l.Config); err != nil {
+			log.Printf("error saving config: %v", err)
+			dialog.ShowError(fmt.Errorf("failed to save config: %w", err), settingsWin)
+		} else {
+			dialog.ShowInformation(language.T().Success, language.T().SettingsResetCloseDialogDesc, settingsWin)
+		}
+	})
+
 	// Create dialog content with all settings
 	dialogContent := container.NewVBox(
 		widget.NewLabel(language.T().SettingsTheme),
-		themeRadio,
+		themeSelect,
 		widget.NewSeparator(),
 		widget.NewLabel(language.T().SettingsTabPosition),
 		posSelect,
 		widget.NewSeparator(),
 		widget.NewLabel(language.T().SettingsLanguage),
-		langRadio,
+		langSelect,
 		widget.NewSeparator(),
 		widget.NewLabel(language.T().SettingsOpacityTitle),
 		opacityLabel,
 		opacitySlider,
-		opacityHint,
 		widget.NewSeparator(),
 		debugCheck,
 		autoStartCheck,
 		minimizeToTrayCheck,
+		widget.NewSeparator(),
+		widget.NewLabel(language.T().SettingsDataManagement),
+		container.NewHBox(
+			widget.NewButton(language.T().SettingsExport, func() {
+				// 临时禁用设置窗口的置顶状态，确保文件对话框显示在前面
+				settingsHwnd := GetWindowHandle(language.T().SettingsTitle)
+				if settingsHwnd != 0 {
+					SetWindowAlwaysOnTop(settingsHwnd, false)
+				}
+
+				filename, err := nativeDialog.File().Title(language.T().SettingsExport).Filter("ZIP Archive", "zip").Save()
+
+				// 恢复设置窗口的置顶状态
+				if settingsHwnd != 0 {
+					SetWindowAlwaysOnTop(settingsHwnd, true)
+				}
+
+				if err == nil && filename != "" {
+					if !strings.HasSuffix(strings.ToLower(filename), ".zip") {
+						filename += ".zip"
+					}
+					if err := storage.ExportConfigWithIcons(filename, l.Config); err != nil {
+						dialog.ShowError(err, settingsWin)
+					}
+					// 导出成功后不显示提示对话框
+				}
+			}),
+			widget.NewButton(language.T().SettingsImport, func() {
+				// 临时禁用设置窗口的置顶状态，确保文件对话框显示在前面
+				settingsHwnd := GetWindowHandle(language.T().SettingsTitle)
+				if settingsHwnd != 0 {
+					SetWindowAlwaysOnTop(settingsHwnd, false)
+				}
+
+				filename, err := nativeDialog.File().Title(language.T().SettingsImport).Filter("ZIP Archive", "zip").Load()
+
+				// 恢复设置窗口的置顶状态
+				if settingsHwnd != 0 {
+					SetWindowAlwaysOnTop(settingsHwnd, true)
+				}
+
+				if err == nil && filename != "" {
+					// Get app data directory from config path
+					appDataDir := filepath.Dir(l.ConfigPath)
+
+					newConfig, err := storage.ImportConfigWithIcons(filename, appDataDir)
+					if err != nil {
+						dialog.ShowError(fmt.Errorf("%s: %v", language.T().SettingsImportError, err), settingsWin)
+						return
+					}
+
+					// Update config
+					l.Config = newConfig
+					// Save to default path
+					if err := storage.SaveConfig(l.ConfigPath, l.Config); err != nil {
+						log.Printf("error saving imported config: %v", err)
+					}
+
+					dialog.ShowInformation(language.T().Success, language.T().SettingsImportSuccess, settingsWin)
+
+					// Refresh UI
+					l.setupUI()
+					// Close settings window
+					settingsWin.Close()
+				}
+			}),
+		),
+		widget.NewSeparator(),
+		widget.NewLabel(language.T().SettingsResetCloseDialog),
+		resetCloseDialogBtn,
 	)
 
 	saveBtn := widget.NewButton(language.T().SettingsSave, func() {
 		// Save Theme
 		var newTheme string
-		switch themeRadio.Selected {
+		switch themeSelect.Selected {
 		case language.T().ThemeSystem:
 			newTheme = model.ThemeSystem
 		case language.T().ThemeLight:
@@ -848,7 +1043,7 @@ func (l *LauncherApp) showSettingsDialog() {
 
 		// Save Language
 		newLang := "en"
-		if langRadio.Selected == "中文" {
+		if langSelect.Selected == "中文" {
 			newLang = "zh"
 		}
 
@@ -912,10 +1107,12 @@ func (l *LauncherApp) showSettingsDialog() {
 			// 重新设置 UI 以应用更改
 			l.setupUI()
 		}
+		l.SettingsWindow = nil
 		settingsWin.Close()
 	})
 
 	cancelBtn := widget.NewButton(language.T().SettingsCancel, func() {
+		l.SettingsWindow = nil
 		settingsWin.Close()
 	})
 
@@ -927,56 +1124,188 @@ func (l *LauncherApp) showSettingsDialog() {
 
 	content := container.NewBorder(nil, buttons, nil, nil, container.NewVScroll(dialogContent))
 	settingsWin.SetContent(content)
+	// keep reference to enforce singleton
+	l.SettingsWindow = settingsWin
+	settingsWin.SetOnClosed(func() {
+		l.SettingsWindow = nil
+	})
+	// 添加ESC键关闭功能
+	setupEscapeKeyCloseWithShortcut(settingsWin, func() {
+		settingsWin.Close()
+	})
 	settingsWin.Show()
+	// 窗口显示后应用样式,确保子窗口在主窗口前面
+	l.applyWindowStyle(language.T().SettingsTitle)
+}
+
+// showAboutDialog 显示关于对话框
+func (l *LauncherApp) showAboutDialog() {
+	// Ensure only one about window exists
+	if l.AboutWindow != nil {
+		// 重新应用窗口样式确保置顶
+		l.applyWindowStyle(language.T().AboutTitle)
+		l.AboutWindow.Show()
+		l.AboutWindow.RequestFocus()
+		return
+	}
+
+	// Create independent window for about
+	aboutWin := l.App.NewWindow(language.T().AboutTitle)
+	aboutWin.Resize(fyne.NewSize(400, 250))
+	aboutWin.CenterOnScreen()
+	aboutWin.SetIcon(nil)
+
+	// Version
+	versionLabel := widget.NewLabel(fmt.Sprintf(language.T().AboutVersion, "v0.5"))
+	versionLabel.Alignment = fyne.TextAlignCenter
+
+	// Author
+	authorLabel := widget.NewLabel(fmt.Sprintf(language.T().AboutAuthor, "buxiuhu"))
+	authorLabel.Alignment = fyne.TextAlignCenter
+
+	// Project Link
+	projectLinkLabel := widget.NewLabel(language.T().AboutLink + ":")
+	projectLinkLabel.Alignment = fyne.TextAlignCenter
+
+	projectLinkBtn := widget.NewButton("https://github.com/buxiuhu/Go-MuseTool", func() {
+		// 使用 Windows API 打开 URL
+		import_cmd := exec.Command("cmd", "/c", "start", "https://github.com/buxiuhu/Go-MuseTool")
+		_ = import_cmd.Start()
+	})
+
+	// Close button
+	closeBtn := widget.NewButton(language.T().Close, func() {
+		l.AboutWindow = nil
+		aboutWin.Close()
+	})
+
+	// Layout - 使用 VBox 布局使三行内容间距一致
+	content := container.NewVBox(
+		container.NewCenter(authorLabel),
+		container.NewCenter(container.NewVBox(
+			projectLinkLabel,
+			projectLinkBtn,
+		)),
+		container.NewCenter(versionLabel),
+		layout.NewSpacer(),
+		container.NewCenter(closeBtn),
+	)
+
+	aboutWin.SetContent(content)
+	// keep reference to enforce singleton
+	l.AboutWindow = aboutWin
+	aboutWin.SetOnClosed(func() {
+		l.AboutWindow = nil
+	})
+	// 添加ESC键关闭功能
+	setupEscapeKeyCloseWithShortcut(aboutWin, func() {
+		aboutWin.Close()
+	})
+	aboutWin.Show()
+	// 窗口显示后应用样式，确保子窗口在主窗口前面
+	l.applyWindowStyle(language.T().AboutTitle)
 }
 
 // --- 群组管理逻辑 ---
 
 func (l *LauncherApp) showAddGroupDialog() {
+	// Ensure only one add group window exists
+	if l.AddGroupWindow != nil {
+		// 重新应用窗口样式确保置顶
+		l.applyWindowStyle(language.T().GroupAddTitle)
+		l.AddGroupWindow.Show()
+		l.AddGroupWindow.RequestFocus()
+		return
+	}
+
 	nameEntry := widget.NewEntry()
 	nameEntry.SetPlaceHolder(language.T().GroupAddLabel)
 
-	dialog.ShowCustomConfirm(language.T().GroupAddTitle, language.T().GroupAddButton, language.T().SettingsCancel, container.NewVBox(
-		widget.NewLabel(language.T().GroupAddLabel),
-		nameEntry,
-	), func(confirmed bool) {
-		if confirmed {
-			name := nameEntry.Text
-			if name == "" {
-				log.Println("group name is empty")
+	// Use an independent window like shortcut/settings dialogs
+	addWin := l.App.NewWindow(language.T().GroupAddTitle)
+	addWin.Resize(fyne.NewSize(400, 160))
+	addWin.CenterOnScreen()
+	addWin.SetIcon(nil)
+
+	saveBtn := widget.NewButton(language.T().GroupAddButton, func() {
+		name := nameEntry.Text
+		if name == "" {
+			dialog.ShowInformation(language.T().Error, language.T().GroupNameEmpty, l.Window)
+			return
+		}
+
+		for _, g := range l.Config.Groups {
+			if g.Name == name {
+				dialog.ShowInformation(language.T().Error, fmt.Sprintf(language.T().GroupAlreadyExists, name), l.Window)
 				return
 			}
-
-			for _, g := range l.Config.Groups {
-				if g.Name == name {
-					dialog.ShowInformation(language.T().Error, fmt.Sprintf(language.T().GroupAlreadyExists, name), l.Window)
-					return
-				}
-			}
-
-			l.Config.Groups = append(l.Config.Groups, model.Group{Name: name, Shortcuts: []model.Shortcut{}})
-			if err := storage.SaveConfig(l.ConfigPath, l.Config); err != nil {
-				log.Printf("error saving config: %v", err)
-			}
-			l.CurrentGroup = name
-			log.Printf("group added successfully: %s", name)
-			l.setupUI()
 		}
-	}, l.Window)
+
+		l.Config.Groups = append(l.Config.Groups, model.Group{Name: name, Shortcuts: []model.Shortcut{}})
+		if err := storage.SaveConfig(l.ConfigPath, l.Config); err != nil {
+			log.Printf("error saving config: %v", err)
+		}
+		l.CurrentGroup = name
+		log.Printf("group added successfully: %s", name)
+		l.setupUI()
+		// clear singleton reference before closing
+		l.AddGroupWindow = nil
+		addWin.Close()
+	})
+
+	cancelBtn := widget.NewButton(language.T().SettingsCancel, func() {
+		l.AddGroupWindow = nil
+		addWin.Close()
+	})
+
+	buttons := container.NewHBox(
+		layout.NewSpacer(),
+		cancelBtn,
+		saveBtn,
+	)
+
+	content := container.NewBorder(nil, buttons, nil, nil, container.NewVBox(
+		widget.NewLabel(language.T().GroupAddLabel),
+		nameEntry,
+	))
+
+	addWin.SetContent(content)
+	// keep reference to enforce single window
+	l.AddGroupWindow = addWin
+	// ensure reference cleared on close
+	addWin.SetOnClosed(func() {
+		l.AddGroupWindow = nil
+	})
+	// 添加ESC键关闭功能
+	setupEscapeKeyCloseWithShortcut(addWin, func() {
+		addWin.Close()
+	})
+	addWin.Show()
+	// 窗口显示后应用样式，确保子窗口在主窗口前面
+	l.applyWindowStyle(language.T().GroupAddTitle)
 }
 
 func (l *LauncherApp) showDeleteGroupDialog() {
+	// Ensure single group window
+	if l.DeleteGroupWindow != nil {
+		// 重新应用窗口样式确保置顶
+		l.applyWindowStyle(language.T().GroupDeleteTitle)
+		l.DeleteGroupWindow.Show()
+		l.DeleteGroupWindow.RequestFocus()
+		return
+	}
+
 	if len(l.Config.Groups) <= 1 {
-		// 外部显示的对话框内容，允许大写
 		dialog.ShowInformation(language.T().GroupCannotDelete, language.T().GroupMustHaveOne, l.Window)
 		return
 	}
 
-	dialog.ShowConfirm(language.T().GroupDeleteTitle, fmt.Sprintf(language.T().GroupDeleteConfirm, l.CurrentGroup), func(confirmed bool) {
-		if !confirmed {
-			return
-		}
+	delWin := l.App.NewWindow(language.T().GroupDeleteTitle)
+	delWin.Resize(fyne.NewSize(420, 160))
+	delWin.CenterOnScreen()
+	delWin.SetIcon(nil)
 
+	confirmBtn := widget.NewButton(language.T().Confirm, func() {
 		newGroups := []model.Group{}
 		for _, g := range l.Config.Groups {
 			if g.Name != l.CurrentGroup {
@@ -996,124 +1325,219 @@ func (l *LauncherApp) showDeleteGroupDialog() {
 
 		log.Printf("group deleted successfully")
 		l.setupUI()
-	}, l.Window)
+		l.DeleteGroupWindow = nil
+		delWin.Close()
+	})
+
+	cancelBtn := widget.NewButton(language.T().Cancel, func() {
+		l.DeleteGroupWindow = nil
+		delWin.Close()
+	})
+
+	btns := container.NewHBox(layout.NewSpacer(), cancelBtn, confirmBtn)
+	content := container.NewBorder(nil, btns, nil, nil, container.NewVBox(widget.NewLabel(fmt.Sprintf(language.T().GroupDeleteConfirm, l.CurrentGroup))))
+
+	delWin.SetContent(content)
+	l.DeleteGroupWindow = delWin
+	delWin.SetOnClosed(func() {
+		l.DeleteGroupWindow = nil
+	})
+	// 添加ESC键关闭功能
+	setupEscapeKeyCloseWithShortcut(delWin, func() {
+		delWin.Close()
+	})
+	delWin.Show()
+	// 窗口显示后应用样式，确保子窗口在主窗口前面
+	l.applyWindowStyle(language.T().GroupDeleteTitle)
 }
 
 func (l *LauncherApp) showEditGroupDialog() {
+	// Ensure single group window
+	if l.EditGroupWindow != nil {
+		// 重新应用窗口样式确保置顶
+		l.applyWindowStyle(language.T().GroupRenameTitle)
+		l.EditGroupWindow.Show()
+		l.EditGroupWindow.RequestFocus()
+		return
+	}
+
 	nameEntry := widget.NewEntry()
 	nameEntry.SetPlaceHolder(language.T().GroupRenameLabel)
 	nameEntry.SetText(l.CurrentGroup)
 
-	dialog.ShowCustomConfirm(
-		language.T().GroupRenameTitle,
-		language.T().SettingsSave,
-		language.T().SettingsCancel,
-		container.NewVBox(
-			widget.NewLabel(fmt.Sprintf(language.T().GroupRenameLabel, l.CurrentGroup)),
-			nameEntry,
-		),
-		func(confirmed bool) {
-			if !confirmed {
+	editWin := l.App.NewWindow(language.T().GroupRenameTitle)
+	editWin.Resize(fyne.NewSize(420, 160))
+	editWin.CenterOnScreen()
+	editWin.SetIcon(nil)
+
+	saveBtn := widget.NewButton(language.T().SettingsSave, func() {
+		newName := nameEntry.Text
+		if newName == "" {
+			dialog.ShowInformation(language.T().Error, language.T().GroupNameEmpty, l.Window)
+			return
+		}
+
+		for _, g := range l.Config.Groups {
+			if g.Name == newName && newName != l.CurrentGroup {
+				dialog.ShowInformation(language.T().Error, fmt.Sprintf(language.T().GroupAlreadyExists, newName), l.Window)
 				return
 			}
+		}
 
-			newName := nameEntry.Text
-			if newName == "" {
-				log.Println("group name is empty")
-				return
+		for i := range l.Config.Groups {
+			if l.Config.Groups[i].Name == l.CurrentGroup {
+				l.Config.Groups[i].Name = newName
+				break
 			}
+		}
 
-			for _, g := range l.Config.Groups {
-				if g.Name == newName && newName != l.CurrentGroup {
-					dialog.ShowInformation(language.T().Error, fmt.Sprintf(language.T().GroupAlreadyExists, newName), l.Window)
-					return
-				}
-			}
+		l.CurrentGroup = newName
+		if err := storage.SaveConfig(l.ConfigPath, l.Config); err != nil {
+			log.Printf("error saving config: %v", err)
+		}
+		log.Printf("group renamed successfully to: %s", newName)
+		l.setupUI()
+		l.EditGroupWindow = nil
+		editWin.Close()
+	})
 
-			for i := range l.Config.Groups {
-				if l.Config.Groups[i].Name == l.CurrentGroup {
-					l.Config.Groups[i].Name = newName
-					break
-				}
-			}
+	cancelBtn := widget.NewButton(language.T().SettingsCancel, func() {
+		l.EditGroupWindow = nil
+		editWin.Close()
+	})
 
-			l.CurrentGroup = newName
-			if err := storage.SaveConfig(l.ConfigPath, l.Config); err != nil {
-				log.Printf("error saving config: %v", err)
-			}
-			log.Printf("group renamed successfully to: %s", newName)
-			l.setupUI()
-		},
-		l.Window,
+	buttons := container.NewHBox(
+		layout.NewSpacer(),
+		cancelBtn,
+		saveBtn,
 	)
+
+	content := container.NewBorder(nil, buttons, nil, nil, container.NewVBox(
+		widget.NewLabel(fmt.Sprintf(language.T().GroupRenameLabel, l.CurrentGroup)),
+		nameEntry,
+	))
+
+	editWin.SetContent(content)
+	l.EditGroupWindow = editWin
+	editWin.SetOnClosed(func() {
+		l.EditGroupWindow = nil
+	})
+	// 添加ESC键关闭功能
+	setupEscapeKeyCloseWithShortcut(editWin, func() {
+		editWin.Close()
+	})
+	editWin.Show()
+	// 窗口显示后应用样式，确保子窗口在主窗口前面
+	l.applyWindowStyle(language.T().GroupRenameTitle)
 }
 
 // showEditGroupDialogFor 为指定分组显示重命名对话框
 func (l *LauncherApp) showEditGroupDialogFor(groupName string) {
+	// Ensure single group window
+	if l.EditGroupDialogForWindow != nil {
+		// 重新应用窗口样式确保置顶
+		l.applyWindowStyle(language.T().GroupRenameTitle)
+		l.EditGroupDialogForWindow.Show()
+		l.EditGroupDialogForWindow.RequestFocus()
+		return
+	}
+
 	nameEntry := widget.NewEntry()
 	nameEntry.SetPlaceHolder(language.T().GroupRenameLabel)
 	nameEntry.SetText(groupName)
 
-	dialog.ShowCustomConfirm(
-		language.T().GroupRenameTitle,
-		language.T().SettingsSave,
-		language.T().SettingsCancel,
-		container.NewVBox(
-			widget.NewLabel(fmt.Sprintf(language.T().GroupRenameLabel, groupName)),
-			nameEntry,
-		),
-		func(confirmed bool) {
-			if !confirmed {
+	editWin := l.App.NewWindow(language.T().GroupRenameTitle)
+	editWin.Resize(fyne.NewSize(420, 160))
+	editWin.CenterOnScreen()
+	editWin.SetIcon(nil)
+
+	saveBtn := widget.NewButton(language.T().SettingsSave, func() {
+		newName := nameEntry.Text
+		if newName == "" {
+			dialog.ShowInformation(language.T().Error, language.T().GroupNameEmpty, l.Window)
+			return
+		}
+
+		for _, g := range l.Config.Groups {
+			if g.Name == newName && newName != groupName {
+				dialog.ShowInformation(language.T().Error, fmt.Sprintf(language.T().GroupAlreadyExists, newName), l.Window)
 				return
 			}
+		}
 
-			newName := nameEntry.Text
-			if newName == "" {
-				log.Println("group name is empty")
-				return
+		for i := range l.Config.Groups {
+			if l.Config.Groups[i].Name == groupName {
+				l.Config.Groups[i].Name = newName
+				break
 			}
+		}
 
-			for _, g := range l.Config.Groups {
-				if g.Name == newName && newName != groupName {
-					dialog.ShowInformation(language.T().Error, fmt.Sprintf(language.T().GroupAlreadyExists, newName), l.Window)
-					return
-				}
-			}
+		// 如果重命名的是当前分组，更新 CurrentGroup
+		if l.CurrentGroup == groupName {
+			l.CurrentGroup = newName
+		}
 
-			for i := range l.Config.Groups {
-				if l.Config.Groups[i].Name == groupName {
-					l.Config.Groups[i].Name = newName
-					break
-				}
-			}
+		if err := storage.SaveConfig(l.ConfigPath, l.Config); err != nil {
+			log.Printf("error saving config: %v", err)
+		}
+		log.Printf("group renamed successfully to: %s", newName)
+		l.setupUI()
+		l.EditGroupDialogForWindow = nil
+		editWin.Close()
+	})
 
-			// 如果重命名的是当前分组，更新 CurrentGroup
-			if l.CurrentGroup == groupName {
-				l.CurrentGroup = newName
-			}
+	cancelBtn := widget.NewButton(language.T().SettingsCancel, func() {
+		l.EditGroupDialogForWindow = nil
+		editWin.Close()
+	})
 
-			if err := storage.SaveConfig(l.ConfigPath, l.Config); err != nil {
-				log.Printf("error saving config: %v", err)
-			}
-			log.Printf("group renamed successfully to: %s", newName)
-			l.setupUI()
-		},
-		l.Window,
+	buttons := container.NewHBox(
+		layout.NewSpacer(),
+		cancelBtn,
+		saveBtn,
 	)
+
+	content := container.NewBorder(nil, buttons, nil, nil, container.NewVBox(
+		widget.NewLabel(fmt.Sprintf(language.T().GroupRenameLabel, groupName)),
+		nameEntry,
+	))
+
+	editWin.SetContent(content)
+	l.EditGroupDialogForWindow = editWin
+	editWin.SetOnClosed(func() {
+		l.EditGroupDialogForWindow = nil
+	})
+	// 添加ESC键关闭功能
+	setupEscapeKeyCloseWithShortcut(editWin, func() {
+		editWin.Close()
+	})
+	editWin.Show()
+	// 窗口显示后应用样式，确保子窗口在主窗口前面
+	l.applyWindowStyle(language.T().GroupRenameTitle)
 }
 
 // showDeleteGroupDialogFor 为指定分组显示删除对话框
 func (l *LauncherApp) showDeleteGroupDialogFor(groupName string) {
+	// Ensure single group window
+	if l.DeleteGroupDialogForWindow != nil {
+		// 重新应用窗口样式确保置顶
+		l.applyWindowStyle(language.T().GroupDeleteTitle)
+		l.DeleteGroupDialogForWindow.Show()
+		l.DeleteGroupDialogForWindow.RequestFocus()
+		return
+	}
+
 	if len(l.Config.Groups) <= 1 {
 		dialog.ShowInformation(language.T().GroupCannotDelete, language.T().GroupMustHaveOne, l.Window)
 		return
 	}
 
-	dialog.ShowConfirm(language.T().GroupDeleteTitle, fmt.Sprintf(language.T().GroupDeleteConfirm, groupName), func(confirmed bool) {
-		if !confirmed {
-			return
-		}
+	delWin := l.App.NewWindow(language.T().GroupDeleteTitle)
+	delWin.Resize(fyne.NewSize(420, 160))
+	delWin.CenterOnScreen()
+	delWin.SetIcon(nil)
 
+	confirmBtn := widget.NewButton(language.T().Confirm, func() {
 		newGroups := []model.Group{}
 		for _, g := range l.Config.Groups {
 			if g.Name != groupName {
@@ -1133,12 +1557,50 @@ func (l *LauncherApp) showDeleteGroupDialogFor(groupName string) {
 
 		log.Printf("group deleted successfully")
 		l.setupUI()
-	}, l.Window)
+		l.DeleteGroupDialogForWindow = nil
+		delWin.Close()
+	})
+
+	cancelBtn := widget.NewButton(language.T().Cancel, func() {
+		l.DeleteGroupDialogForWindow = nil
+		delWin.Close()
+	})
+
+	btns := container.NewHBox(layout.NewSpacer(), cancelBtn, confirmBtn)
+	content := container.NewBorder(nil, btns, nil, nil, container.NewVBox(widget.NewLabel(fmt.Sprintf(language.T().GroupDeleteConfirm, groupName))))
+
+	delWin.SetContent(content)
+	l.DeleteGroupDialogForWindow = delWin
+	delWin.SetOnClosed(func() {
+		l.DeleteGroupDialogForWindow = nil
+	})
+	// 添加ESC键关闭功能
+	setupEscapeKeyCloseWithShortcut(delWin, func() {
+		delWin.Close()
+	})
+	delWin.Show()
+	// 窗口显示后应用样式，确保子窗口在主窗口前面
+	l.applyWindowStyle(language.T().GroupDeleteTitle)
 }
 
 // --- 快捷方式和运行时逻辑 ---
 
 func (l *LauncherApp) showShortcutDialog(editing *model.Shortcut) {
+	// Ensure single shortcut window
+	if l.ShortcutWindow != nil {
+		// 重新应用窗口样式确保置顶
+		var title string
+		if editing != nil {
+			title = language.T().ShortcutEditTitle
+		} else {
+			title = language.T().ShortcutAddTitle
+		}
+		l.applyWindowStyle(title)
+		l.ShortcutWindow.Show()
+		l.ShortcutWindow.RequestFocus()
+		return
+	}
+
 	nameEntry := widget.NewEntry()
 	nameEntry.SetPlaceHolder(language.T().ShortcutName)
 	pathEntry := widget.NewEntry()
@@ -1165,33 +1627,10 @@ func (l *LauncherApp) showShortcutDialog(editing *model.Shortcut) {
 	shortcutWin := l.App.NewWindow(title)
 	shortcutWin.Resize(fyne.NewSize(400, 300))
 	shortcutWin.CenterOnScreen()
+	shortcutWin.SetIcon(nil)
 
 	// Apply current theme (title bar color + TopMost)
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		hwnd := GetWindowHandle(title)
-		if hwnd != 0 {
-			// 设置窗口总在最上层
-			SetWindowAlwaysOnTop(hwnd, true)
-
-			// 根据当前主题设置标题栏颜色
-			var color uint32
-			switch l.Config.ThemePreference {
-			case model.ThemeDark:
-				color = 0x202020 // 深灰色
-			case model.ThemeLight:
-				color = 0xF0F0F0 // 浅灰色
-			default:
-				// 跟随系统
-				if IsSystemDarkMode() {
-					color = 0x202020
-				} else {
-					color = 0xF0F0F0
-				}
-			}
-			SetTitleBarColor(hwnd, color)
-		}
-	}()
+	l.applyWindowStyle(title)
 
 	browseBtn := widget.NewButton(language.T().ShortcutBrowse, func() {
 		filename, err := nativeDialog.File().Title(language.T().ShortcutBrowseExe).
@@ -1247,10 +1686,12 @@ func (l *LauncherApp) showShortcutDialog(editing *model.Shortcut) {
 		}
 		log.Printf("shortcut saved successfully: %s", name)
 		l.setupUI()
+		l.ShortcutWindow = nil
 		shortcutWin.Close()
 	})
 
 	cancelBtn := widget.NewButton(language.T().SettingsCancel, func() {
+		l.ShortcutWindow = nil
 		shortcutWin.Close()
 	})
 
@@ -1274,6 +1715,14 @@ func (l *LauncherApp) showShortcutDialog(editing *model.Shortcut) {
 	)
 
 	shortcutWin.SetContent(content)
+	l.ShortcutWindow = shortcutWin
+	shortcutWin.SetOnClosed(func() {
+		l.ShortcutWindow = nil
+	})
+	// 添加ESC键关闭功能
+	setupEscapeKeyCloseWithShortcut(shortcutWin, func() {
+		shortcutWin.Close()
+	})
 	shortcutWin.Show()
 }
 
@@ -1286,6 +1735,62 @@ func (l *LauncherApp) deleteShortcut(groupName, shortcutName string) {
 		log.Printf("error saving config: %v", err)
 	}
 	l.setupUI()
+}
+
+// showDeleteShortcutDialog 显示删除快捷方式确认对话框
+func (l *LauncherApp) showDeleteShortcutDialog(groupName, shortcutName string) {
+	// Ensure only one delete shortcut window exists
+	if l.DeleteShortcutWindow != nil {
+		// 重新应用窗口样式确保置顶
+		l.applyWindowStyle(language.T().ShortcutDeleteTitle)
+		l.DeleteShortcutWindow.Show()
+		l.DeleteShortcutWindow.RequestFocus()
+		return
+	}
+
+	delWin := l.App.NewWindow(language.T().ShortcutDeleteTitle)
+	delWin.Resize(fyne.NewSize(350, 140))
+	delWin.CenterOnScreen()
+	delWin.SetIcon(nil)
+
+	confirmBtn := widget.NewButton(language.T().Confirm, func() {
+		if err := storage.RemoveShortcut(l.Config, groupName, shortcutName); err != nil {
+			log.Printf("error removing shortcut: %v", err)
+			dialog.ShowError(fmt.Errorf("failed to delete shortcut: %w", err), l.Window)
+			return
+		}
+		if err := storage.SaveConfig(l.ConfigPath, l.Config); err != nil {
+			log.Printf("error saving config: %v", err)
+		}
+		log.Printf("shortcut deleted successfully: %s", shortcutName)
+		l.setupUI()
+		l.DeleteShortcutWindow = nil
+		delWin.Close()
+	})
+
+	cancelBtn := widget.NewButton(language.T().Cancel, func() {
+		l.DeleteShortcutWindow = nil
+		delWin.Close()
+	})
+
+	btns := container.NewHBox(layout.NewSpacer(), cancelBtn, confirmBtn)
+	content := container.NewBorder(nil, btns, nil, nil, container.NewVBox(
+		widget.NewLabel(fmt.Sprintf(language.T().ShortcutDeleteConfirm, shortcutName)),
+	))
+
+	delWin.SetContent(content)
+	// keep reference to enforce singleton
+	l.DeleteShortcutWindow = delWin
+	delWin.SetOnClosed(func() {
+		l.DeleteShortcutWindow = nil
+	})
+	// 添加ESC键关闭功能
+	setupEscapeKeyCloseWithShortcut(delWin, func() {
+		delWin.Close()
+	})
+	delWin.Show()
+	// 窗口显示后应用样式，确保子窗口在主窗口前面
+	l.applyWindowStyle(language.T().ShortcutDeleteTitle)
 }
 
 // reorderGroup 重新排序分组
@@ -1453,6 +1958,12 @@ func (l *LauncherApp) Dropped(_ fyne.Position, uris []fyne.URI) {
 
 // saveWindowState 保存窗口状态到配置文件
 func (l *LauncherApp) saveWindowState() {
+	// 如果窗口处于全屏模式，则不保存窗口状态
+	if l.Window.FullScreen() {
+		log.Println("window is in fullscreen mode, skipping state save.")
+		return
+	}
+
 	hwnd := GetWindowHandle(language.T().WindowTitle)
 	if hwnd == 0 {
 		log.Println("failed to get window handle for saving state")

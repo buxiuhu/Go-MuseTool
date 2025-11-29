@@ -23,19 +23,27 @@ type Translations struct {
 	ToolbarSettings    string
 
 	// Settings Dialog
-	SettingsTitle          string
-	SettingsTheme          string
-	SettingsTabPosition    string
-	SettingsOpacity        string
-	SettingsOpacityTitle   string
-	SettingsOpacityHint    string
-	SettingsLanguage       string
-	SettingsDebugLog       string
-	SettingsAutoStart      string
-	SettingsMinimizeToTray string
-	SettingsSave           string
-	SettingsCancel         string
-	SettingsClose          string
+	SettingsTitle                string
+	SettingsTheme                string
+	SettingsTabPosition          string
+	SettingsOpacity              string
+	SettingsOpacityTitle         string
+	SettingsOpacityHint          string
+	SettingsLanguage             string
+	SettingsDebugLog             string
+	SettingsAutoStart            string
+	SettingsMinimizeToTray       string
+	SettingsResetCloseDialog     string
+	SettingsResetCloseDialogDesc string
+	SettingsDataManagement       string
+	SettingsExport               string
+	SettingsImport               string
+	SettingsExportSuccess        string
+	SettingsImportSuccess        string
+	SettingsImportError          string
+	SettingsSave                 string
+	SettingsCancel               string
+	SettingsClose                string
 
 	// Theme Options
 	ThemeSystem string
@@ -65,21 +73,23 @@ type Translations struct {
 	GroupNameEmpty     string
 
 	// Shortcut Management
-	ShortcutEdit         string
-	ShortcutDelete       string
-	ShortcutMoveTo       string
-	ShortcutAdd          string
-	ShortcutAddTitle     string
-	ShortcutEditTitle    string
-	ShortcutName         string
-	ShortcutPath         string
-	ShortcutIcon         string
-	ShortcutBrowse       string
-	ShortcutBrowseExe    string
-	ShortcutBrowseIcon   string
-	ShortcutSave         string
-	ShortcutCancel       string
-	ShortcutNameRequired string
+	ShortcutEdit          string
+	ShortcutDelete        string
+	ShortcutDeleteTitle   string
+	ShortcutDeleteConfirm string
+	ShortcutMoveTo        string
+	ShortcutAdd           string
+	ShortcutAddTitle      string
+	ShortcutEditTitle     string
+	ShortcutName          string
+	ShortcutPath          string
+	ShortcutIcon          string
+	ShortcutBrowse        string
+	ShortcutBrowseExe     string
+	ShortcutBrowseIcon    string
+	ShortcutSave          string
+	ShortcutCancel        string
+	ShortcutNameRequired  string
 
 	// Context Menu
 	ContextMenuNewGroup    string
@@ -108,6 +118,12 @@ type Translations struct {
 	CloseDialogMinimize string
 	CloseDialogExit     string
 	CloseDialogRemember string
+
+	// About Dialog
+	AboutTitle   string
+	AboutVersion string
+	AboutAuthor  string
+	AboutLink    string
 }
 
 var (
@@ -159,4 +175,9 @@ func GetLanguage() string {
 	mu.RLock()
 	defer mu.RUnlock()
 	return currentLang
+}
+
+// CurrentLanguage returns the current language code (alias for GetLanguage)
+func CurrentLanguage() string {
+	return GetLanguage()
 }

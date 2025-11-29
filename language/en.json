@@ -41,6 +41,8 @@
   "GroupNameEmpty": "Group name is empty",
   "ShortcutEdit": "Edit",
   "ShortcutDelete": "Delete",
+  "ShortcutDeleteTitle": "Delete Shortcut",
+  "ShortcutDeleteConfirm": "Are you sure you want to delete shortcut '%s'?",
   "ShortcutMoveTo": "Move to Group",
   "ShortcutAdd": "Add Shortcut",
   "ShortcutAddTitle": "Add New Shortcut",
@@ -73,5 +75,17 @@
   "CloseDialogMessage": "You clicked the close button. Do you want to minimize the application to the system tray or exit the program?",
   "CloseDialogMinimize": "Minimize to Tray",
   "CloseDialogExit": "Exit Program",
-  "CloseDialogRemember": "Remember my choice (can be changed in Settings)"
+  "CloseDialogRemember": "Remember my choice (can be changed in Settings)",
+  "SettingsResetCloseDialog": "Reset Close Prompt",
+  "SettingsResetCloseDialogDesc": "Reset the close application prompt dialog. It will be shown again next time you close.",
+  "SettingsDataManagement": "Data Management",
+  "SettingsExport": "Export Config",
+  "SettingsImport": "Import Config",
+  "SettingsExportSuccess": "Configuration exported successfully",
+  "SettingsImportSuccess": "Configuration imported successfully",
+  "SettingsImportError": "Failed to import configuration",
+  "AboutTitle": "About",
+  "AboutVersion": "Version: %s",
+  "AboutAuthor": "Author: %s",
+  "AboutLink": "Project Link"
 }
