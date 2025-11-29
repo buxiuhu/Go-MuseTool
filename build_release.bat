@@ -23,25 +23,35 @@ REM Generate embedded resources
 echo [2/4] Generating embedded resources...
 where windres >nul 2>&1
 if %ERRORLEVEL% EQU 0 (
-    windres -i resource.rc -o GoMuseTool.syso -O coff
+    windres -i GoMuseTool.rc -o GoMuseTool.syso -O coff
 ) else (
-    "%USERPROFILE%\go\bin\rsrc" -ico GOMuseTool.ico -o GoMuseTool.syso
+    "%USERPROFILE%\go\bin\rsrc" -ico real_icon.ico -o GoMuseTool.syso
+)
+
+REM Set output directory and filename
+set OUTPUT_DIR=..\release
+set OUTPUT_FILE=GoMuseTool_Windows_X64.exe
+
+REM Create release directory if it doesn't exist
+if not exist "%OUTPUT_DIR%" (
+    echo Creating release directory...
+    mkdir "%OUTPUT_DIR%"
 )
 
 REM Build release version
 echo [3/4] Compiling release executable...
-go build -ldflags "-H windowsgui -s -w" -trimpath -o GoMuseTool.exe .
+go build -ldflags "-H windowsgui -s -w" -trimpath -o "%OUTPUT_DIR%\%OUTPUT_FILE%" .
 
 if %ERRORLEVEL% EQU 0 (
     echo [4/4] Verifying build...
-    if exist GoMuseTool.exe (
-        for %%A in (GoMuseTool.exe) do set size=%%~zA
+    if exist "%OUTPUT_DIR%\%OUTPUT_FILE%" (
+        for %%A in ("%OUTPUT_DIR%\%OUTPUT_FILE%") do set size=%%~zA
         echo.
         echo ========================================
         echo BUILD SUCCESSFUL!
         echo ========================================
         echo.
-        echo Output file: GoMuseTool.exe
+        echo Output file: %OUTPUT_DIR%\%OUTPUT_FILE%
         echo File size: %size% bytes
         echo.
         echo The executable includes:

@@ -15,6 +15,10 @@ import (
 var iconData []byte
 
 func main() {
+	// Set standard log format to match logger package
+	log.SetFlags(log.Ldate | log.Ltime)
+	log.SetPrefix("【SYSTEM】")
+
 	// Check if another instance is already running
 	if !ui.CheckSingleInstance() {
 		// Another instance is running, show dialog and exit

@@ -1,22 +1,22 @@
 {
-  "theme_preference": "",
-  "language": "",
-  "tab_position": "",
+  "theme_preference": "System",
+  "language": "en",
+  "tab_position": "top",
   "window_decorated": false,
-  "window_x": 651,
-  "window_y": 300,
-  "window_width": 1188,
-  "window_height": 957,
+  "window_x": 927,
+  "window_y": 264,
+  "window_width": 706,
+  "window_height": 956,
   "title_bar_color": 0,
-  "opacity": 0,
+  "opacity": 1,
   "debug_mode": false,
   "auto_start": false,
   "minimize_to_tray": false,
-  "close_dialog_shown": false,
+  "close_dialog_shown": true,
   "groups": [
     {
       "name": "Default",
-      "shortcuts": null
+      "shortcuts": []
     }
   ]
 }
