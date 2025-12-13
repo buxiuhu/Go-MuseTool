@@ -41,4 +41,5 @@ go build -ldflags "-H windowsgui -s -w" -trimpath -o GoMuseTool.exe .
 
 ## License
 
-[MIT License](LICENSE)
+[Apache License](LICENSE)
+
